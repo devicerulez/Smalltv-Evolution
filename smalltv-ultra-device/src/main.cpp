@@ -23,7 +23,7 @@
 #include <time.h>
 #include "webui.h"
 
-#define FW_VERSION  "1.0.0"
+#define FW_VERSION  "1.0.1"
 #define HOSTNAME    "smalltv"
 #define AP_SSID     "SmallTV-Setup"
 #define AP_PASS     "smalltv1234"
@@ -46,6 +46,8 @@ static const int CARD_X   = 6;
 static const int CARD_Y   = 116;
 static const int CARD_W   = 228;
 static const int CARD_H   = 122;
+static const int DESC_Y   = 188;   // riga delle condizioni (a rotazione)
+static const uint32_t INFO_ROTATE_MS = 4000;  // cambio dato ogni 4 secondi
 
 // ------------------------------------------------------------------
 //  Oggetti globali
@@ -70,6 +72,11 @@ struct Config {
   bool flip;          // ruota 180 gradi
   bool invert;        // inverti colori pannello
   bool swapRB;        // scambia rosso/blu
+  bool h12;           // formato orario 12 h (AM/PM)
+  bool nightOn;       // modalita' notturna attiva
+  uint16_t nStart;    // inizio notte (minuti dalla mezzanotte)
+  uint16_t nEnd;      // fine notte (minuti dalla mezzanotte)
+  uint8_t nBright;    // luminosita' notturna 0..100
 };
 Config cfg;
 
@@ -84,6 +91,11 @@ void cfgDefaults() {
   cfg.flip = false;
   cfg.invert = true;
   cfg.swapRB = false;
+  cfg.h12 = false;
+  cfg.nightOn = false;
+  cfg.nStart = 22 * 60;
+  cfg.nEnd = 7 * 60;
+  cfg.nBright = 10;
 }
 
 // copia solo caratteri ASCII stampabili (i font del display sono ASCII)
@@ -152,8 +164,13 @@ struct Weather {
   float tmin;
   float tmax;
   uint32_t fetchedAt;
+  float feels;    // temperatura percepita
+  float wind;     // km/h
+  float pres;     // hPa (livello del mare)
+  int sunrise;    // minuti dalla mezzanotte, -1 se non disponibile
+  int sunset;
 };
-Weather wx = {false, 0, 0, 0, true, 0, 0, 0};
+Weather wx = {false, 0, 0, 0, true, 0, 0, 0, 0, 0, 0, -1, -1};
 
 uint8_t timeFont = 8;
 int timeY = TIME_Y;
@@ -162,7 +179,10 @@ time_t lastNow = 0;
 int lastDigitsKey = -1;
 int lastHdrKey = -1000;
 int lastSec = -1;
-uint32_t lastDot = 0;
+uint8_t infoIdx = 0;          // quale dato mostrare nella riga delle condizioni
+uint32_t lastInfoRot = 0;
+int curBright = -1;           // luminosita' applicata (-1 = ancora nessuna)
+uint32_t lastBrightCheck = 0;
 
 const char* const DAYS[] = {"DOM", "LUN", "MAR", "MER", "GIO", "VEN", "SAB"};
 const char* const MONTHS[] = {"GEN", "FEB", "MAR", "APR", "MAG", "GIU", "LUG", "AGO", "SET", "OTT", "NOV", "DIC"};
@@ -174,7 +194,7 @@ bool loadConfig() {
   cfgDefaults();
   File f = LittleFS.open("/config.json", "r");
   if (!f) return false;
-  StaticJsonDocument<768> d;
+  DynamicJsonDocument d(1024);
   DeserializationError e = deserializeJson(d, f);
   f.close();
   if (e) return false;
@@ -194,11 +214,19 @@ bool loadConfig() {
   cfg.flip = d["flip"] | false;
   cfg.invert = d["invert"] | true;
   cfg.swapRB = d["swap"] | false;
+  cfg.h12 = d["h12"] | false;
+  cfg.nightOn = d["night"] | false;
+  v = d["ns"] | (22 * 60);
+  cfg.nStart = constrain(v, 0, 1439);
+  v = d["ne"] | (7 * 60);
+  cfg.nEnd = constrain(v, 0, 1439);
+  v = d["nb"] | 10;
+  cfg.nBright = constrain(v, 0, 100);
   return true;
 }
 
 bool saveConfig() {
-  StaticJsonDocument<768> d;
+  DynamicJsonDocument d(1024);
   d["ssid"] = cfg.ssid;
   d["pass"] = cfg.pass;
   d["city"] = cfg.city;
@@ -210,6 +238,11 @@ bool saveConfig() {
   d["flip"] = cfg.flip;
   d["invert"] = cfg.invert;
   d["swap"] = cfg.swapRB;
+  d["h12"] = cfg.h12;
+  d["night"] = cfg.nightOn;
+  d["ns"] = cfg.nStart;
+  d["ne"] = cfg.nEnd;
+  d["nb"] = cfg.nBright;
   File f = LittleFS.open("/config.json", "w");
   if (!f) return false;
   serializeJson(d, f);
@@ -227,6 +260,27 @@ void setBacklight(uint8_t pct) {
   duty = 255 - duty;
 #endif
   analogWrite(BL_PIN, duty);
+}
+
+// true se l'ora attuale cade nella fascia notturna impostata
+bool nightActive() {
+  if (!cfg.nightOn || cfg.nStart == cfg.nEnd) return false;
+  time_t now = time(nullptr);
+  if (now < 1700000000) return false;  // ora non ancora sincronizzata
+  struct tm ti;
+  localtime_r(&now, &ti);
+  int m = ti.tm_hour * 60 + ti.tm_min;
+  if (cfg.nStart < cfg.nEnd) return m >= cfg.nStart && m < cfg.nEnd;
+  return m >= cfg.nStart || m < cfg.nEnd;  // fascia a cavallo della mezzanotte
+}
+
+// applica la luminosita' di giorno o di notte (solo se cambiata, oppure con force)
+void applyBrightness(bool force) {
+  int target = nightActive() ? cfg.nBright : cfg.bright;
+  if (force || target != curBright) {
+    curBright = target;
+    setBacklight((uint8_t)target);
+  }
 }
 
 // ------------------------------------------------------------------
@@ -298,7 +352,6 @@ void drawCloudShape(int cx, int cy, uint16_t c) {
 void drawWeatherIcon(Icon ic, int cx, int cy, uint16_t cardc) {
   const uint16_t sun = col(0xFFC531), moon = col(0xE8EEFF), cl = col(0xD3DEF0), dk = col(0x93A5BF);
   const uint16_t rn = col(0x4FB8FF), sn = col(0xFFFFFF), bolt = col(0xFFE14A), fog = col(0xB5C3D8);
-  tft.fillRect(10, 128, 74, 62, cardc);
   switch (ic) {
     case IC_SUN:
       drawSunShape(cx, cy, 13, sun);
@@ -381,6 +434,12 @@ void drawHeader(const struct tm* ti, bool synced) {
     snprintf(buf, sizeof(buf), " %d %s", ti->tm_mday, MONTHS[ti->tm_mon]);
     tft.setTextColor(col(th->text));
     tft.drawString(buf, 10 + w, 1, 4);
+    // anno dopo il mese; se non entra prima dell'icona Wi-Fi uso un font piu' piccolo
+    int x = 10 + w + tft.textWidth(buf, 4);
+    char yb[8];
+    snprintf(yb, sizeof(yb), " %d", ti->tm_year + 1900);
+    int yf = (x + tft.textWidth(yb, 4) <= 200) ? 4 : 2;
+    tft.drawString(yb, x, (yf == 4) ? 1 : 7, yf);
   } else {
     tft.setTextColor(col(th->dim));
     tft.drawString("Sincronizzo ora...", 10, 6, 2);
@@ -416,14 +475,32 @@ void drawTimeDigits(int hh, int mm, bool synced) {
   int x0, wD, wC;
   timeGeom(x0, wD, wC);
   uint16_t bg = col(th->bg);
+  const bool use12 = cfg.h12 && synced;
+  int dh = hh;
+  if (use12) {
+    dh = hh % 12;
+    if (dh == 0) dh = 12;
+  }
   char b[4];
   tft.setTextDatum(TL_DATUM);
-  snprintf(b, sizeof(b), "%02d", hh);
+  snprintf(b, sizeof(b), "%02d", dh);
   tft.setTextColor(col(synced ? th->text : th->dim), bg);
   tft.drawString(b, x0, timeY, timeFont);
   snprintf(b, sizeof(b), "%02d", mm);
   tft.setTextColor(col(synced ? th->a1 : th->dim), bg);
   tft.drawString(b, x0 + wD + wC, timeY, timeFont);
+
+  // indicatore AM / PM a destra dei minuti (solo nel formato 12 ore)
+  if (use12) {
+    int wAp = tft.textWidth("PM", 4);
+    int ax = x0 + 2 * wD + wC + 6;
+    if (ax + wAp > 238) ax = 238 - wAp;
+    int ay = timeY + tft.fontHeight(timeFont) - 28;
+    tft.setTextColor(col(th->a2), bg);
+    tft.setTextPadding(wAp);
+    tft.drawString((hh >= 12) ? "PM" : "AM", ax, ay, 4);
+    tft.setTextPadding(0);
+  }
 }
 
 void drawColon(bool on) {
@@ -442,26 +519,133 @@ void drawSecBar(int sec) {
   if (w > 6) tft.fillRect(8 + w - 6, BAR_Y, 6, 4, col(th->a2));
 }
 
-uint32_t dotColor() {
-  if (!wx.valid) return 0xFF4D4D;
-  uint32_t age = millis() - wx.fetchedAt;
-  uint32_t limit = (uint32_t)cfg.wxMinutes * 60000UL * 2UL + 60000UL;
-  return (age > limit) ? 0xFFB020 : 0x3DDC84;
+// ------------------------------------------------------------------
+//  Card meteo
+// ------------------------------------------------------------------
+// Dati mostrati a rotazione (ogni 4 s) nella riga delle condizioni
+enum Info { INFO_COND, INFO_FEELS, INFO_WIND, INFO_PRES, INFO_SUNRISE, INFO_SUNSET, INFO_COUNT };
+
+bool infoAvailable(uint8_t i) {
+  switch (i) {
+    case INFO_PRES:    return wx.pres > 0;
+    case INFO_SUNRISE: return wx.sunrise >= 0;
+    case INFO_SUNSET:  return wx.sunset >= 0;
+    default:           return true;
+  }
+}
+
+void nextInfo() {
+  for (uint8_t n = 0; n < INFO_COUNT; n++) {
+    infoIdx = (infoIdx + 1) % INFO_COUNT;
+    if (infoAvailable(infoIdx)) return;
+  }
+}
+
+// minuti dalla mezzanotte -> "06:45" (24 h) oppure "6:45 AM" (12 h)
+void fmtClock(char* out, size_t n, int mins) {
+  int h = mins / 60, m = mins % 60;
+  if (cfg.h12) {
+    const char* ap = (h >= 12) ? "PM" : "AM";
+    h %= 12;
+    if (h == 0) h = 12;
+    snprintf(out, n, "%d:%02d %s", h, m, ap);
+  } else {
+    snprintf(out, n, "%02d:%02d", h, m);
+  }
+}
+
+// Riga con una sola scritta centrata (condizioni del tempo)
+void drawCondLine(const char* text) {
+  const uint16_t cbg = col(th->card);
+  int f = (tft.textWidth(text, 4) <= CARD_W - 16) ? 4 : 2;
+  tft.fillRect(CARD_X + 6, DESC_Y, CARD_W - 12, 26, cbg);
+  tft.setTextDatum(TC_DATUM);
+  tft.setTextColor(col(th->text), cbg);
+  tft.drawString(text, CARD_X + CARD_W / 2, DESC_Y + ((f == 4) ? 0 : 5), f);
+  tft.setTextDatum(TL_DATUM);
+}
+
+// Riga a due colori: etichetta (colore del tema) + valore, centrata.
+// Con deg=true dopo il valore disegna "°C" (i font non hanno il simbolo del grado).
+void drawLabelValue(const char* label, const char* value, bool deg) {
+  const uint16_t cbg = col(th->card);
+  int f = 4, gap = 8, r = 3;
+  int wl = tft.textWidth(label, f), wv = tft.textWidth(value, f);
+  int wc = deg ? tft.textWidth("C", f) : 0;
+  int total = wl + gap + wv + (deg ? (2 + (2 * r + 1) + 2 + wc) : 0);
+  if (total > CARD_W - 16) {  // non entra: uso il font piccolo
+    f = 2; gap = 5; r = 2;
+    wl = tft.textWidth(label, f);
+    wv = tft.textWidth(value, f);
+    wc = deg ? tft.textWidth("C", f) : 0;
+    total = wl + gap + wv + (deg ? (2 + (2 * r + 1) + 2 + wc) : 0);
+  }
+  int y = DESC_Y + ((f == 4) ? 0 : 5);
+  int x = CARD_X + CARD_W / 2 - total / 2;
+
+  tft.fillRect(CARD_X + 6, DESC_Y, CARD_W - 12, 26, cbg);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(col(th->a1), cbg);
+  tft.drawString(label, x, y, f);
+  x += wl + gap;
+  tft.setTextColor(col(th->text), cbg);
+  tft.drawString(value, x, y, f);
+  if (deg) {
+    x += wv + 2;
+    int ry = y + ((f == 4) ? 8 : 5);
+    tft.drawCircle(x + r, ry, r, col(th->a1));
+    tft.drawCircle(x + r, ry, r - 1, col(th->a1));
+    x += (2 * r + 1) + 2;
+    tft.setTextColor(col(th->a1), cbg);
+    tft.drawString("C", x, y, f);
+  }
+}
+
+// Disegna il dato corrente della riga a rotazione
+void drawInfoLine() {
+  if (!wx.valid) {
+    drawCondLine("Carico meteo...");
+    return;
+  }
+  if (!infoAvailable(infoIdx)) infoIdx = INFO_COND;
+  char v[28];
+  switch (infoIdx) {
+    case INFO_FEELS:
+      snprintf(v, sizeof(v), "%d", (int)lroundf(wx.feels));
+      drawLabelValue("Percepita", v, true);
+      break;
+    case INFO_WIND:
+      snprintf(v, sizeof(v), "%.2f km/h", wx.wind);
+      for (char* p = v; *p; p++) {
+        if (*p == '.') *p = ',';
+      }
+      drawLabelValue("Vento", v, false);
+      break;
+    case INFO_PRES:
+      snprintf(v, sizeof(v), "%d hPa", (int)lroundf(wx.pres));
+      drawLabelValue("Atm", v, false);
+      break;
+    case INFO_SUNRISE:
+      fmtClock(v, sizeof(v), wx.sunrise);
+      drawLabelValue("Alba", v, false);
+      break;
+    case INFO_SUNSET:
+      fmtClock(v, sizeof(v), wx.sunset);
+      drawLabelValue("Tramonto", v, false);
+      break;
+    default:
+      drawCondLine(descFor(wx.code));
+      break;
+  }
 }
 
 void drawCard() {
   uint16_t cbg = col(th->card);
   tft.setTextDatum(TL_DATUM);
 
-  // titolo: citta' + pallino di stato
-  tft.fillRect(CARD_X + 14, CARD_Y + 4, CARD_W - 28, 18, cbg);
-  char city[24];
-  strlcpy(city, cfg.city, sizeof(city));
-  for (char* p = city; *p; p++) *p = toupper((unsigned char)*p);
-  tft.setTextColor(col(th->a2), cbg);
-  tft.drawString(city, CARD_X + 14, CARD_Y + 5, 2);
-  lastDot = dotColor();
-  tft.fillCircle(CARD_X + CARD_W - 18, CARD_Y + 14, 4, col(lastDot));
+  // ripulisco l'interno superiore (titolo, icona, temperatura) senza toccare gli angoli arrotondati
+  tft.fillRect(CARD_X + 12, CARD_Y + 3, CARD_W - 24, 11, cbg);
+  tft.fillRect(CARD_X + 3, CARD_Y + 14, CARD_W - 6, DESC_Y - (CARD_Y + 14), cbg);
 
   // icona
   Icon ic = wx.valid ? iconFor(wx.code, wx.day) : IC_CLOUD;
@@ -469,7 +653,6 @@ void drawCard() {
 
   // temperatura
   const int tempY = CARD_Y + 21;
-  tft.fillRect(88, tempY - 2, 138, 50, cbg);
   char tb[8];
   if (wx.valid) snprintf(tb, sizeof(tb), "%d", (int)lroundf(wx.temp));
   else strlcpy(tb, "--", sizeof(tb));
@@ -483,16 +666,23 @@ void drawCard() {
   tft.setTextColor(col(th->a1), cbg);
   tft.drawString("C", x0 + tw + 18, tempY + 3, 4);
 
-  // descrizione
-  tft.fillRect(CARD_X + 6, 188, CARD_W - 12, 26, cbg);
-  tft.setTextDatum(TC_DATUM);
-  tft.setTextColor(col(th->text), cbg);
-  tft.drawString(wx.valid ? descFor(wx.code) : "Carico meteo...", CARD_X + CARD_W / 2, 188, 4);
+  // citta': disegnata per ultima e senza sfondo, cosi' resta sempre in primo piano
+  // (trasparente sopra icona e grafica)
+  char city[24];
+  strlcpy(city, cfg.city, sizeof(city));
+  for (char* p = city; *p; p++) *p = toupper((unsigned char)*p);
+  tft.setTextColor(col(th->a2));
+  tft.drawString(city, CARD_X + 14, CARD_Y + 3, 2);
+
+  // riga delle condizioni / dati a rotazione
+  drawInfoLine();
+  lastInfoRot = millis();
 
   // riga min / max / umidita'
   tft.fillRect(CARD_X + 16, 218, CARD_W - 32, 16, cbg);
   if (wx.valid) {
     char s[16];
+    tft.setTextDatum(TC_DATUM);
     tft.setTextColor(col(0x5CC8FF), cbg);
     snprintf(s, sizeof(s), "MIN %d", (int)lroundf(wx.tmin));
     tft.drawString(s, 44, 218, 2);
@@ -610,7 +800,7 @@ void updateClock() {
   localtime_r(&now, &ti);
 
   int lvl = wifiLevel();
-  int hdrKey = synced ? ((ti.tm_mon * 32 + ti.tm_mday) * 8 + lvl) : (-2 - lvl);
+  int hdrKey = synced ? (((ti.tm_year * 12 + ti.tm_mon) * 32 + ti.tm_mday) * 8 + lvl) : (-2 - lvl);
   if (hdrKey != lastHdrKey) {
     drawHeader(&ti, synced);
     lastHdrKey = hdrKey;
@@ -628,13 +818,19 @@ void updateClock() {
     drawSecBar(sec);
     lastSec = sec;
   }
-
-  if (dotColor() != lastDot) wxDirty = true;
 }
 
 // ------------------------------------------------------------------
 //  Meteo (Open-Meteo)
 // ------------------------------------------------------------------
+// "2026-10-31T06:45" -> minuti dalla mezzanotte (-1 se non valido)
+int parseHM(const char* iso) {
+  const char* t = iso ? strchr(iso, 'T') : nullptr;
+  int h, m;
+  if (t && sscanf(t + 1, "%d:%d", &h, &m) == 2 && h >= 0 && h < 24 && m >= 0 && m < 60) return h * 60 + m;
+  return -1;
+}
+
 bool fetchWeather() {
   if (WiFi.status() != WL_CONNECTED) return false;
 
@@ -648,11 +844,13 @@ bool fetchWeather() {
     return false;
   }
 
-  char url[330];
+  char url[480];
   snprintf(url, sizeof(url),
            "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
-           "&current=temperature_2m,relative_humidity_2m,weather_code,is_day"
-           "&daily=temperature_2m_max,temperature_2m_min&timezone=Europe%%2FRome&forecast_days=1",
+           "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,is_day,"
+           "wind_speed_10m,pressure_msl"
+           "&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset"
+           "&timezone=Europe%%2FRome&forecast_days=1",
            cfg.lat, cfg.lon);
 
   HTTPClient http;
@@ -666,15 +864,20 @@ bool fetchWeather() {
     return false;
   }
 
-  StaticJsonDocument<256> filter;
+  DynamicJsonDocument filter(512);
   filter["current"]["temperature_2m"] = true;
   filter["current"]["relative_humidity_2m"] = true;
+  filter["current"]["apparent_temperature"] = true;
   filter["current"]["weather_code"] = true;
   filter["current"]["is_day"] = true;
+  filter["current"]["wind_speed_10m"] = true;
+  filter["current"]["pressure_msl"] = true;
   filter["daily"]["temperature_2m_max"][0] = true;
   filter["daily"]["temperature_2m_min"][0] = true;
+  filter["daily"]["sunrise"][0] = true;
+  filter["daily"]["sunset"][0] = true;
 
-  StaticJsonDocument<512> doc;
+  DynamicJsonDocument doc(1024);
   DeserializationError err = deserializeJson(doc, http.getStream(), DeserializationOption::Filter(filter));
   http.end();
   if (err) {
@@ -688,8 +891,13 @@ bool fetchWeather() {
   wx.hum = cur["relative_humidity_2m"] | 0;
   wx.code = cur["weather_code"] | 0;
   wx.day = (cur["is_day"] | 1) != 0;
+  wx.feels = cur["apparent_temperature"] | wx.temp;
+  wx.wind = cur["wind_speed_10m"] | 0.0f;
+  wx.pres = cur["pressure_msl"] | 0.0f;
   wx.tmax = doc["daily"]["temperature_2m_max"][0] | wx.temp;
   wx.tmin = doc["daily"]["temperature_2m_min"][0] | wx.temp;
+  wx.sunrise = parseHM(doc["daily"]["sunrise"][0] | "");
+  wx.sunset = parseHM(doc["daily"]["sunset"][0] | "");
   wx.fetchedAt = millis();
   wx.valid = true;
   wxDirty = true;
@@ -709,8 +917,22 @@ void sendJsonDoc(const JsonDocument& d) {
   server.send(200, "application/json", out);
 }
 
+// "HH:MM" <-> minuti dalla mezzanotte
+void minToStr(char* out, size_t n, uint16_t m) {
+  snprintf(out, n, "%02d:%02d", m / 60, m % 60);
+}
+
+bool strToMin(const char* s, uint16_t& out) {
+  int h, m;
+  if (s && sscanf(s, "%d:%d", &h, &m) == 2 && h >= 0 && h < 24 && m >= 0 && m < 60) {
+    out = (uint16_t)(h * 60 + m);
+    return true;
+  }
+  return false;
+}
+
 void handleConfigGet() {
-  StaticJsonDocument<384> d;
+  DynamicJsonDocument d(768);
   d["city"] = cfg.city;
   d["lat"] = cfg.lat;
   d["lon"] = cfg.lon;
@@ -721,17 +943,25 @@ void handleConfigGet() {
   d["invert"] = cfg.invert;
   d["swap"] = cfg.swapRB;
   d["ssid"] = cfg.ssid;
+  d["h12"] = cfg.h12;
+  d["night"] = cfg.nightOn;
+  char t[8];
+  minToStr(t, sizeof(t), cfg.nStart);
+  d["ns"] = String(t);
+  minToStr(t, sizeof(t), cfg.nEnd);
+  d["ne"] = String(t);
+  d["nb"] = cfg.nBright;
   sendJsonDoc(d);
 }
 
 void handleConfigPost() {
-  StaticJsonDocument<512> d;
+  DynamicJsonDocument d(1024);
   if (deserializeJson(d, server.arg("plain"))) {
     server.send(400, "application/json", "{\"ok\":false}");
     return;
   }
   uint8_t oldTheme = cfg.theme;
-  bool oldFlip = cfg.flip, oldInv = cfg.invert, oldSwap = cfg.swapRB;
+  bool oldFlip = cfg.flip, oldInv = cfg.invert, oldSwap = cfg.swapRB, oldH12 = cfg.h12;
   float oldLat = cfg.lat, oldLon = cfg.lon;
 
   if (d.containsKey("city")) {
@@ -746,11 +976,18 @@ void handleConfigPost() {
   if (d.containsKey("flip")) cfg.flip = d["flip"].as<bool>();
   if (d.containsKey("invert")) cfg.invert = d["invert"].as<bool>();
   if (d.containsKey("swap")) cfg.swapRB = d["swap"].as<bool>();
+  if (d.containsKey("h12")) cfg.h12 = d["h12"].as<bool>();
+  if (d.containsKey("night")) cfg.nightOn = d["night"].as<bool>();
+  uint16_t mm;
+  if (d.containsKey("ns") && strToMin(d["ns"] | "", mm)) cfg.nStart = mm;
+  if (d.containsKey("ne") && strToMin(d["ne"] | "", mm)) cfg.nEnd = mm;
+  if (d.containsKey("nb")) cfg.nBright = constrain(d["nb"].as<int>(), 0, 100);
 
   saveConfig();
-  setBacklight(cfg.bright);
+  applyBrightness(true);
 
-  if (cfg.theme != oldTheme || cfg.flip != oldFlip || cfg.invert != oldInv || cfg.swapRB != oldSwap) needRedraw = true;
+  if (cfg.theme != oldTheme || cfg.flip != oldFlip || cfg.invert != oldInv || cfg.swapRB != oldSwap ||
+      cfg.h12 != oldH12) needRedraw = true;
   else wxDirty = true;
   if (fabsf(cfg.lat - oldLat) > 0.0001f || fabsf(cfg.lon - oldLon) > 0.0001f) {
     wx.valid = false;
@@ -761,7 +998,7 @@ void handleConfigPost() {
 }
 
 void handleStatus() {
-  StaticJsonDocument<512> d;
+  DynamicJsonDocument d(768);
   time_t now = time(nullptr);
   bool synced = now > 1700000000;
   struct tm ti;
@@ -778,6 +1015,7 @@ void handleStatus() {
   d["synced"] = synced;
   d["time"] = tb;
   d["date"] = db;
+  d["nm"] = nightActive();
   JsonObject w = d.createNestedObject("wx");
   w["ok"] = wx.valid;
   if (wx.valid) {
@@ -953,7 +1191,7 @@ void setup() {
   tft.invertDisplay(cfg.invert);
   tft.fillScreen(col(th->bg));
   initTimeFont();
-  setBacklight(cfg.bright);
+  applyBrightness(true);
   drawSplash("Avvio...");
 
   bool online = false;
@@ -1006,6 +1244,19 @@ void loop() {
   if (wxDirty) {
     wxDirty = false;
     drawCard();
+  }
+
+  // dato a rotazione nella riga delle condizioni (ogni 4 secondi)
+  if (wx.valid && (millis() - lastInfoRot) >= INFO_ROTATE_MS) {
+    lastInfoRot = millis();
+    nextInfo();
+    drawInfoLine();
+  }
+
+  // luminosita' giorno/notte
+  if ((millis() - lastBrightCheck) >= 1000UL) {
+    lastBrightCheck = millis();
+    applyBrightness(false);
   }
   delay(2);
 }
