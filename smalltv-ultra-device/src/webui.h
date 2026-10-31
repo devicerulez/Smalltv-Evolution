@@ -27,6 +27,9 @@ h2{margin:0 0 12px;font-size:12px;letter-spacing:1.6px;text-transform:uppercase;
 .live{text-align:center;padding:22px 16px}
 #tm{font-size:76px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:1px;background:linear-gradient(90deg,var(--tx),var(--a1));-webkit-background-clip:text;background-clip:text;color:transparent}
 #sec{font-size:22px;color:var(--a2);font-weight:700;margin-left:6px;font-variant-numeric:tabular-nums}
+#ap{font-size:18px;color:var(--a1);font-weight:700;margin-left:6px}
+.on-badge{display:none;margin-left:8px;font-size:11px;letter-spacing:.5px;color:#05060f;background:var(--a1);border-radius:99px;padding:2px 9px;vertical-align:middle}
+.on-badge.show{display:inline-block}
 #dt{color:var(--dim);text-transform:uppercase;letter-spacing:2px;font-size:13px;margin:6px 0 14px}
 .wxrow{display:flex;justify-content:center;align-items:baseline;gap:14px;flex-wrap:wrap}
 #wt{font-size:40px;font-weight:700}#wd{color:var(--a1);font-size:17px}
@@ -60,10 +63,10 @@ input[type=range]{width:100%;accent-color:var(--a1)}
 a.btn{display:block;text-align:center;text-decoration:none}
 </style></head><body>
 <div class="wrap">
-<header><h1>SmallTV Ultra</h1><span class="chip"><i class="dot" id="dot"></i><span id="ip">...</span></span></header>
+<header><div><h1>SmallTV Ultra</h1><div class="sub" id="ver">V.1.0.1</div></div><span class="chip"><i class="dot" id="dot"></i><span id="ip">...</span></span></header>
 
 <section class="card live">
-  <div><span id="tm">--:--</span><span id="sec"></span></div>
+  <div><span id="tm">--:--</span><span id="sec"></span><span id="ap"></span></div>
   <div id="dt">&nbsp;</div>
   <div class="wxrow"><span id="wt">--&deg;</span><span id="wd">In attesa del meteo...</span></div>
   <div class="sub" id="wx2"></div>
@@ -88,6 +91,20 @@ a.btn{display:block;text-align:center;text-decoration:none}
   <div class="themes" id="themes"></div>
   <label>Luminosit&agrave; <b id="brv" style="color:var(--tx)"></b></label>
   <input id="br" type="range" min="5" max="100" step="5">
+  <label for="fmt">Formato dell&rsquo;ora</label>
+  <select id="fmt"><option value="24">24 ore (es. 19:31)</option><option value="12">12 ore con AM/PM (es. 07:31 PM)</option></select>
+</section>
+
+<section class="card">
+  <h2>Modalit&agrave; notturna <span class="on-badge" id="nmb">attiva ora</span></h2>
+  <div class="sw"><span>Abbassa la luminosit&agrave; di notte<small>nella fascia oraria scelta qui sotto</small></span><input id="nm" type="checkbox"></div>
+  <div class="row">
+    <div><label for="ns">Dalle</label><input id="ns" type="time" value="22:00"></div>
+    <div><label for="ne">Alle</label><input id="ne" type="time" value="07:00"></div>
+  </div>
+  <label>Luminosit&agrave; notturna <b id="nbv" style="color:var(--tx)"></b></label>
+  <input id="nb" type="range" min="0" max="100" step="1">
+  <div class="sub">0% = schermo spento durante la notte</div>
 </section>
 
 <section class="card">
@@ -124,7 +141,7 @@ const TH=[
  {n:"Tramonto",a:"#ff9f1c",b:"#ff3d81",bg:"#120610",c:"#2a0f26"},
  {n:"Ghiaccio",a:"#7fd1ff",b:"#a78bfa",bg:"#06101c",c:"#0f2338"},
  {n:"Ambra",a:"#ffb000",b:"#ff6a00",bg:"#000000",c:"#14100a"}];
-let C={city:"ROMA",lat:41.8919,lon:12.5113,theme:0,bright:80,wx:15,flip:false,invert:true,swap:false};
+let C={city:"ROMA",lat:41.8919,lon:12.5113,theme:0,bright:80,wx:15,flip:false,invert:true,swap:false,h12:false,night:false,ns:"22:00",ne:"07:00",nb:10};
 const strip=s=>s.normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^\x20-\x7e]/g,'');
 function toast(t){const e=$('#toast');e.textContent=t;e.className='show';clearTimeout(toast.t);toast.t=setTimeout(()=>e.className='',2200)}
 function wxText(c){
@@ -143,10 +160,13 @@ function render(){
  $('#cur').textContent=C.city;$('#lat').value=C.lat;$('#lon').value=C.lon;$('#wxm').value=String(C.wx);
  $('#br').value=C.bright;$('#brv').textContent=C.bright+'%';
  $('#flip').checked=!!C.flip;$('#inv').checked=!!C.invert;$('#swp').checked=!!C.swap;
+ $('#fmt').value=C.h12?'12':'24';
+ $('#nm').checked=!!C.night;$('#ns').value=C.ns;$('#ne').value=C.ne;$('#nb').value=C.nb;$('#nbv').textContent=C.nb+'%';
  applyTheme(C.theme);renderThemes()}
 async function load(){try{const r=await fetch('/api/config',{cache:'no-store'});C=Object.assign(C,await r.json());render()}catch(e){toast('Impossibile leggere le impostazioni')}}
 async function save(){
  C.bright=+$('#br').value;C.wx=+$('#wxm').value;C.flip=$('#flip').checked;C.invert=$('#inv').checked;C.swap=$('#swp').checked;
+ C.h12=$('#fmt').value==='12';C.night=$('#nm').checked;C.ns=$('#ns').value||'22:00';C.ne=$('#ne').value||'07:00';C.nb=+$('#nb').value;
  C.lat=parseFloat($('#lat').value)||C.lat;C.lon=parseFloat($('#lon').value)||C.lon;
  try{const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(C)});
   toast(r.ok?'Salvato ✓':'Errore nel salvataggio');render()}catch(e){toast('Dispositivo non raggiungibile')}}
@@ -165,17 +185,22 @@ async function search(){
 async function poll(){
  try{const s=await(await fetch('/api/status',{cache:'no-store'})).json();
   $('#dot').className='dot on';$('#ip').textContent=s.ip;
-  $('#tm').textContent=s.synced?s.time.slice(0,5):'--:--';$('#sec').textContent=s.synced?s.time.slice(6):'';
+  let hm=s.time.slice(0,5),ap='';
+  if(s.synced&&C.h12){let h=+s.time.slice(0,2);ap=h>=12?'PM':'AM';h=h%12||12;hm=(h<10?'0':'')+h+s.time.slice(2,5)}
+  $('#tm').textContent=s.synced?hm:'--:--';$('#sec').textContent=s.synced?s.time.slice(6):'';$('#ap').textContent=ap;
+  $('#nmb').className='on-badge'+(s.nm?' show':'');
   if(s.synced){const p=s.date.split('-').map(Number);
    $('#dt').textContent=new Date(p[0],p[1]-1,p[2]).toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long'})}
   if(s.wx&&s.wx.ok){$('#wt').textContent=Math.round(s.wx.t)+'°';$('#wd').textContent=wxText(s.wx.code);
    $('#wx2').textContent='Min '+Math.round(s.wx.min)+'°  Max '+Math.round(s.wx.max)+'°  Umidità '+s.wx.hum+'%'}
   else{$('#wt').textContent='--°';$('#wd').textContent='In attesa del meteo...';$('#wx2').textContent=''}
-  $('#i_ssid').textContent=s.ssid||'-';$('#i_rssi').textContent=s.rssi+' dBm';$('#i_fw').textContent=s.fw;$('#i_heap').textContent=Math.round(s.heap/1024)+' KB'
+  $('#i_ssid').textContent=s.ssid||'-';$('#i_rssi').textContent=s.rssi+' dBm';$('#i_fw').textContent='V.'+s.fw;$('#ver').textContent='V.'+s.fw;$('#i_heap').textContent=Math.round(s.heap/1024)+' KB'
  }catch(e){$('#dot').className='dot'}
  setTimeout(poll,2000)}
 $('#bs').onclick=search;$('#q').onkeydown=e=>{if(e.key==='Enter')search()};
 $('#bsave').onclick=save;$('#br').oninput=()=>$('#brv').textContent=$('#br').value+'%';$('#br').onchange=save;
+$('#nb').oninput=()=>$('#nbv').textContent=$('#nb').value+'%';
+$('#fmt').onchange=()=>{C.h12=$('#fmt').value==='12'};
 $('#bref').onclick=async()=>{await post('/api/refresh');toast('Aggiornamento richiesto')};
 $('#breb').onclick=async()=>{if(confirm('Riavviare SmallTV?')){await post('/api/reboot');toast('Riavvio...')}};
 $('#bforget').onclick=async()=>{if(confirm('Dimenticare la rete Wi-Fi? Lo schermo mostrerà di nuovo la procedura di configurazione.')){await post('/api/forget');toast('Fatto, riavvio...')}};
