@@ -1,4 +1,4 @@
-# SmallTV Ultra Device (ESP8266) - Release V.1.0.1 Italiano - Orologio + Meteo
+# SmallTV Ultra Device (ESP8266) - Release V.1.0.2 Italiano - Orologio + Meteo
 
 Firmware personalizzato per SmallTV Ultra (ESP8266, TFT ST7789 240x240, flash 4 MB).
 
@@ -7,6 +7,9 @@ Firmware personalizzato per SmallTV Ultra (ESP8266, TFT ST7789 240x240, flash 4 
 - La riga delle condizioni cambia ogni 4 secondi: condizioni, temperatura percepita, vento, pressione (Atm), alba, tramonto
 - Data con anno, formato ora 24 h oppure 12 h (AM/PM) a scelta
 - Modalita' notturna: luminosita' 0-100% in una fascia oraria a scelta
+- **Previsioni dei prossimi 3 giorni** (schermata dedicata, durata a scelta)
+- **Foto**: si caricano dall'interfaccia web, vengono convertite a 240x240 e compresse nel browser (8-15 KB ciascuna); fino a 20 foto, mostrate a rotazione con durata a scelta
+- Sequenza delle schermate: principale (24 s) -> previsioni -> foto -> principale -> previsioni -> foto successiva -> ...
 - 5 temi colore (Neon, Aurora, Tramonto, Ghiaccio, Ambra)
 - **Portale Wi-Fi**: se non c'e' una rete salvata (o non si collega) il display mostra come configurarla dal telefono
 - **Interfaccia web** su `http://smalltv.local` (o l'IP mostrato all'avvio): citta', tema, luminosita', rotazione, aggiornamento firmware
@@ -52,8 +55,10 @@ SCLK = GPIO14, MOSI = GPIO13, DC = GPIO0, RST = GPIO2, CS = non usato, retroillu
 - La rete `SmallTV-Setup` e' protetta; la password e' mostrata sul display. Puoi cambiarla in `src/main.cpp` (`AP_PASS`).
 - La pagina `/update` non ha password: usala solo su una rete di cui ti fidi.
 - Il meteo e' aggiornato ogni 10-60 minuti (a scelta). Durante l'aggiornamento l'orologio puo' fermarsi per 1-3 secondi.
+- Le foto sono salvate nella memoria del dispositivo (circa 1 MB disponibile) e restano anche dopo il riavvio e gli aggiornamenti del firmware.
 - Le lettere accentate non sono visualizzate sul display (font solo ASCII): "Forli" invece di "Forli'".
 
 ## Versioni
+- **V.1.0.2** - schermata previsioni 3 giorni; caricamento e visualizzazione foto (decoder JPEG integrato); sequenza delle schermate configurabile dall'interfaccia web.
 - **V.1.0.1** - anno nella data; citta' sempre in primo piano; rimosso il pallino di stato del meteo; riga condizioni a rotazione (percepita, vento, pressione, alba, tramonto); modalita' notturna; formato ora 12/24 h.
 - **V.1.0.0** - prima versione.
