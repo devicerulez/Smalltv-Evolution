@@ -1,4 +1,4 @@
-# SmallTV Ultra Device (ESP8266) - Release V.1.0.2 Italiano - Orologio + Meteo
+# SmallTV Ultra Device (ESP8266) - Release V.1.0.3 Italiano - Orologio + Meteo + Foto + Fasi lunari + Citazione del giorno
 
 Firmware personalizzato per SmallTV Ultra (ESP8266, TFT ST7789 240x240, flash 4 MB).
 
@@ -9,11 +9,13 @@ Firmware personalizzato per SmallTV Ultra (ESP8266, TFT ST7789 240x240, flash 4 
 - Modalita' notturna: luminosita' 0-100% in una fascia oraria a scelta
 - **Previsioni dei prossimi 3 giorni** (schermata dedicata, durata a scelta)
 - **Foto**: si caricano dall'interfaccia web, vengono convertite a 240x240 e compresse nel browser (8-15 KB ciascuna); fino a 20 foto, mostrate a rotazione con durata a scelta
-- Sequenza delle schermate: principale (24 s) -> previsioni -> foto -> principale -> previsioni -> foto successiva -> ...
+- **Fasi lunari**: disco lunare disegnato in tempo reale, percentuale di illuminazione, nome della fase e data della prossima luna piena (calcolo astronomico a bordo, nessun servizio online)
+- **Citazione del giorno**: 59 citazioni verificate (in italiano), una diversa ogni giorno, con font serif corsivo anti-aliased e lettere accentate
+- Sequenza delle schermate: principale (24 s) -> previsioni -> luna -> citazione -> foto -> principale -> ... (le schermate disattivate vengono saltate; una sola foto per giro)
 - 5 temi colore (Neon, Aurora, Tramonto, Ghiaccio, Ambra)
 - **Portale Wi-Fi**: se non c'e' una rete salvata (o non si collega) il display mostra come configurarla dal telefono
 - **Interfaccia web** su `http://smalltv.local` (o l'IP mostrato all'avvio): citta', tema, luminosita', rotazione, aggiornamento firmware
-
+  
 > Testato su hardware reale: i pin sono quelli piu' comuni per questo dispositivo. Vedi "Se qualcosa non va".
 
 ## 1. Backup del firmware originale (consigliato!)
@@ -26,7 +28,7 @@ Per ripristinare il firmware originale: `esptool.py --port COMX write_flash 0 ba
 ## 2. Installare il firmware
 Via USB:
 ```
-esptool.py --port COMX --baud 460800 write_flash 0x0 smalltv-ultra-firmware1.0.0.bin
+esptool.py --port COMX --baud 460800 write_flash 0x0 smalltv-ultra-firmwarex.x.x.bin
 ```
 A seconda del modello puo' servire mettere GPIO0 a GND all'accensione per entrare in modalita' bootloader.
 Se il firmware originale ha una pagina di aggiornamento via browser, puoi provare a caricare il `.bin` da li'; dopo la prima installazione gli aggiornamenti si fanno da `http://smalltv.local/update`.
@@ -35,7 +37,7 @@ Se il firmware originale ha una pagina di aggiornamento via browser, puoi provar
 1. Il display mostra **CONFIGURA WI-FI**: collegati alla rete `SmallTV-Setup` (password `smalltv1234`).
 2. Si apre da sola la pagina di setup (altrimenti vai su `192.168.4.1`): scegli la rete e inserisci la password.
 3. Lo SmallTV si riavvia, mostra l'indirizzo e passa all'orologio.
-4. Dal telefono, ora collegato al tuo Wi-Fi, apri l'indirizzo segnalato al riavvio per configurare il dispositivo.
+4. Dal telefono, ora collegato al tuo Wi-Fi, apri l'indirizzo `http://smalltv.local` o l'ip segnalato al riavvio per configurare il dispositivo.
 
 ## Se qualcosa non va
 | Sintomo | Cosa fare |
@@ -59,6 +61,7 @@ SCLK = GPIO14, MOSI = GPIO13, DC = GPIO0, RST = GPIO2, CS = non usato, retroillu
 - Le lettere accentate non sono visualizzate sul display (font solo ASCII): "Forli" invece di "Forli'".
 
 ## Versioni
+- **V.1.0.3** - schermata fasi lunari (illuminazione, fase, prossima luna piena); schermata citazione del giorno con font personalizzati; entrambe attivabili dall'interfaccia web con durata 2-60 s (default 5) e inserite nella sequenza.
 - **V.1.0.2** - schermata previsioni 3 giorni; caricamento e visualizzazione foto (decoder JPEG integrato); sequenza delle schermate configurabile dall'interfaccia web.
 - **V.1.0.1** - anno nella data; citta' sempre in primo piano; rimosso il pallino di stato del meteo; riga condizioni a rotazione (percepita, vento, pressione, alba, tramonto); modalita' notturna; formato ora 12/24 h.
 - **V.1.0.0** - prima versione.
