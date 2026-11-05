@@ -11,7 +11,7 @@ Firmware personalizzato per SmallTV Ultra (ESP8266, TFT ST7789 240x240, flash 4 
 - **Foto**: si caricano dall'interfaccia web, vengono convertite a 240x240 e compresse nel browser (8-15 KB ciascuna); fino a 20 foto, mostrate a rotazione con durata a scelta
 - **Fasi lunari**: disco lunare disegnato in tempo reale, percentuale di illuminazione, nome della fase e data della prossima luna piena (calcolo astronomico a bordo, nessun servizio online)
 - **Citazione del giorno**: 59 citazioni verificate (in italiano), una diversa ogni giorno, con font serif corsivo anti-aliased e lettere accentate
-- **Market Watch**: grafici delle criptovalute (ultime 24 ore) con prezzo, variazione e riempimento sfumato; fino a 4 monete a scelta tra BTC, ETH, BNB, SOL, XRP, ADA, DOGE, LTC, LINK, AVAX, in euro o dollari (dati Binance, nessuna chiave API)
+- **Cripto**: grafici delle criptovalute (ultime 24 ore) con prezzo, variazione e riempimento sfumato; fino a 4 monete a scelta tra BTC, ETH, BNB, SOL, XRP, ADA, DOGE, LTC, LINK, AVAX, in euro o dollari (dati Binance, nessuna chiave API)
 - **Ordine delle schermate a scelta**: nell'interfaccia web trascina i blocchi (mouse o dito) o usa le frecce da tastiera sulla maniglia; la principale (24 s) e' sempre la prima, poi le schermate attive nell'ordine scelto (default: previsioni, luna, citazione, market, foto); le disattivate vengono saltate; una sola foto per giro
 - **Ripristino di fabbrica** dal pulsante in fondo (Sistema): cancella impostazioni, foto e rete Wi-Fi e riparte dal portale di configurazione
 - 5 temi colore (Neon, Aurora, Tramonto, Ghiaccio, Ambra)
@@ -61,11 +61,11 @@ SCLK = GPIO14, MOSI = GPIO13, DC = GPIO0, RST = GPIO2, CS = non usato, retroillu
 - Il meteo e' aggiornato ogni 10-60 minuti (a scelta). Durante l'aggiornamento l'orologio puo' fermarsi per 1-3 secondi.
 - Le foto sono salvate nella memoria del dispositivo (circa 1 MB disponibile) e restano anche dopo il riavvio e gli aggiornamenti del firmware.
 - Le lettere accentate nella citazione sono visualizzate correttamente; nel resto dell'interfaccia sul display (font di serie, solo ASCII) no: "Forli" invece di "Forli'".
-- Market Watch scarica i dati una moneta alla volta (circa ogni 5 minuti per moneta); se Binance non e' raggiungibile dalla tua rete la schermata viene saltata. Se un'altra moneta non compare, la coppia potrebbe non esistere nella valuta scelta.
-- Per cambiare le citazioni modifica `tools/gen_quote_assets.py` e rilancialo (`python3 tools/gen_quote_assets.py`, serve Pillow): rigenera `src/quotes.h` e `src/qfonts.h`.
+- La schermata Cripto scarica i dati una moneta alla volta (circa ogni 5 minuti per moneta); se Binance non e' raggiungibile dalla tua rete la schermata viene saltata. Se un'altra moneta non compare, la coppia potrebbe non esistere nella valuta scelta.
+- Per cambiare le citazioni modifica `tools/gen_quote_assets.py` e rilancialo (`python3 tools/gen_quote_assets.py`, serve Pillow): rigenera `smalltv-ultra-device/src/quotes.h` e `smalltv-ultra-device/src/qfonts.h`.
 
 ## Versioni
-- **V.1.0.4** - Market Watch (criptovalute); ordine delle schermate con trascinamento; ripristino di fabbrica dall'interfaccia web.
+- **V.1.0.4** - schermata Cripto (criptovalute); ordine delle schermate con trascinamento; ripristino di fabbrica dall'interfaccia web.
 - **V.1.0.3** - schermata fasi lunari (illuminazione, fase, prossima luna piena); schermata citazione del giorno con font personalizzati; entrambe attivabili dall'interfaccia web con durata 2-60 s (default 5) e inserite nella sequenza.
 - **V.1.0.2** - schermata previsioni 3 giorni; caricamento e visualizzazione foto (decoder JPEG integrato); sequenza delle schermate configurabile dall'interfaccia web.
 - **V.1.0.1** - anno nella data; citta' sempre in primo piano; rimosso il pallino di stato del meteo; riga condizioni a rotazione (percepita, vento, pressione, alba, tramonto); modalita' notturna; formato ora 12/24 h.
