@@ -1,4 +1,4 @@
-<p align="center"><img src="images/Logo_minimalista_Small_TV_Evolution.png" alt="Small TV Evolution" width="420"></p>
+<p align="center"><img src="https://github.com/devicerulez/Smalltv-Evolution/blob/main/images/Logo_minimalista_Small_TV_Evolution.png)" alt="Small TV Evolution" width="420"></p>
 
 # SmallTV Evolution (ESP8266) - Release V.2.0.0 Italiano - Orologio + Meteo + Aria + Foto + Fasi lunari + Radar ISS + Citazione del giorno + Countdown + Cripto + Numeri + Frattali + Tamagotchi + Sistema
 
