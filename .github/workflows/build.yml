@@ -1,0 +1,43 @@
+name: Compila firmware SmallTV Evolution
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installa PlatformIO
+        run: pip install platformio
+
+      - name: Trova la cartella del progetto
+        id: proj
+        run: |
+          INI=$(find . -name platformio.ini -not -path "./.pio/*" | head -n 1)
+          if [ -z "$INI" ]; then
+            echo "platformio.ini non trovato nel repository. File presenti:"
+            find . -path ./.git -prune -o -type f -print
+            exit 1
+          fi
+          DIR=$(dirname "$INI")
+          echo "Progetto trovato in: $DIR"
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Compila
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: pio run
+
+      - name: Prepara il .bin
+        run: cp "${{ steps.proj.outputs.dir }}/.pio/build/smalltv_evolution/firmware.bin" smalltv-evolution-firmware.bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smalltv-evolution-firmware
+          path: smalltv-evolution-firmware.bin
